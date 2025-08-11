@@ -42,11 +42,11 @@ export default function QuotesPage() {
   const [quotesQueue, setQuotesQueue] = useState<Quote[]>([])
   const [currentIndex, setCurrentIndex] = useState(0)
   const [showMobileMenu, setShowMobileMenu] = useState(false)
-  const [fetchId, setFetchId] = useState(0) // Add unique fetch identifier
+  const [isInitialLoad, setIsInitialLoad] = useState(true)
 
   // Fetch batch of random quotes (prefetch 10 at a time)
-  const { data: quotesData, isLoading, error, refetch } = useQuery<QuotesResponse>({
-    queryKey: ['quotes', 'random', fetchId],
+  const { data: quotesData, isLoading, error } = useQuery<QuotesResponse>({
+    queryKey: ['quotes', 'random'],
     queryFn: async () => {
       // Add timestamp to prevent caching issues
       const timestamp = Date.now()
@@ -56,21 +56,20 @@ export default function QuotesPage() {
       }
       return response.json()
     },
-    enabled: !!session,
-    staleTime: 0, // Always refetch to ensure fresh quotes
+    enabled: !!session && isInitialLoad,
+    staleTime: Infinity, // Never consider stale
     gcTime: 0, // Don't cache the results
   })
 
-  // Initialize quotes queue when data loads
+  // Initialize quotes queue when data loads (only on initial load)
   useEffect(() => {
-    if (quotesData?.quotes && quotesData.quotes.length > 0) {
+    if (quotesData?.quotes && quotesData.quotes.length > 0 && isInitialLoad) {
       setQuotesQueue(quotesData.quotes)
       setCurrentIndex(0)
-      if (!currentQuote) {
-        setCurrentQuote(quotesData.quotes[0])
-      }
+      setCurrentQuote(quotesData.quotes[0])
+      setIsInitialLoad(false)
     }
-  }, [quotesData?.quotes, currentQuote])
+  }, [quotesData?.quotes, isInitialLoad])
 
   // Function to get next quote from queue or refetch new batch
   const getNewQuote = useCallback(async () => {
@@ -81,16 +80,30 @@ export default function QuotesPage() {
       setCurrentIndex(nextIndex)
       setCurrentQuote(quotesQueue[nextIndex])
     } else {
-      // Queue is exhausted, fetch new batch with unique ID
-      setFetchId(prev => prev + 1)
-      const { data } = await refetch()
-      if (data?.quotes && data.quotes.length > 0) {
-        setQuotesQueue(data.quotes)
-        setCurrentIndex(0)
-        setCurrentQuote(data.quotes[0])
+      // Queue is exhausted, fetch new batch manually
+      try {
+        const timestamp = Date.now()
+        const response = await fetch(`/api/quotes?random=true&count=10&t=${timestamp}`)
+        if (!response.ok) {
+          throw new Error('Failed to fetch quotes')
+        }
+        const data: QuotesResponse = await response.json()
+        
+        if (data?.quotes && data.quotes.length > 0) {
+          setQuotesQueue(data.quotes)
+          setCurrentIndex(0)
+          setCurrentQuote(data.quotes[0])
+        }
+      } catch (error) {
+        console.error('Failed to fetch new quotes:', error)
+        // If we fail, loop back to the beginning of the current queue
+        if (quotesQueue.length > 0) {
+          setCurrentIndex(0)
+          setCurrentQuote(quotesQueue[0])
+        }
       }
     }
-  }, [currentIndex, quotesQueue, refetch])
+  }, [currentIndex, quotesQueue])
 
   // Add quote mutation
   const addQuoteMutation = useMutation({
@@ -105,16 +118,27 @@ export default function QuotesPage() {
       }
       return response.json()
     },
-    onSuccess: () => {
+    onSuccess: async () => {
       queryClient.invalidateQueries({ queryKey: ['quotes'] })
       setShowAddForm(false)
       setNewQuote({ text: '', author: '', category: '', source: '' })
-      // Reset queue to fetch fresh batch that includes the new quote
-      setQuotesQueue([])
-      setCurrentIndex(0)
-      setFetchId(prev => prev + 1)
-      refetch()
       toast.success('Quote added successfully!')
+      
+      // Fetch fresh batch that might include the new quote
+      try {
+        const timestamp = Date.now()
+        const response = await fetch(`/api/quotes?random=true&count=10&t=${timestamp}`)
+        if (response.ok) {
+          const data = await response.json()
+          if (data?.quotes && data.quotes.length > 0) {
+            setQuotesQueue(data.quotes)
+            setCurrentIndex(0)
+            setCurrentQuote(data.quotes[0])
+          }
+        }
+      } catch (error) {
+        console.error('Failed to refresh quotes after adding:', error)
+      }
     },
     onError: () => {
       toast.error('Failed to add quote')
