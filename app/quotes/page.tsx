@@ -3,7 +3,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useState, useEffect, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Heart, RefreshCw, Plus, LogOut, Settings, Maximize } from 'lucide-react'
+import { Heart, RefreshCw, Plus, LogOut, Settings, Maximize, Menu, X } from 'lucide-react'
 import { signOut, useSession } from 'next-auth/react'
 import { useTheme } from 'next-themes'
 import toast from 'react-hot-toast'
@@ -41,6 +41,7 @@ export default function QuotesPage() {
   const [newQuote, setNewQuote] = useState({ text: '', author: '', category: '', source: '' })
   const [quotesQueue, setQuotesQueue] = useState<Quote[]>([])
   const [currentIndex, setCurrentIndex] = useState(0)
+  const [showMobileMenu, setShowMobileMenu] = useState(false)
 
   // Fetch batch of random quotes (prefetch 10 at a time)
   const { data: quotesData, isLoading, error, refetch } = useQuery<QuotesResponse>({
@@ -224,6 +225,21 @@ export default function QuotesPage() {
     return () => document.removeEventListener('fullscreenchange', handleFullscreenChange)
   }, [wakeLock])
 
+  // Close mobile menu when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (showMobileMenu) {
+        const target = event.target as Element
+        if (!target.closest('[data-mobile-menu]')) {
+          setShowMobileMenu(false)
+        }
+      }
+    }
+
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [showMobileMenu])
+
   // Fullscreen functions
   const enterFullscreen = async () => {
     try {
@@ -357,10 +373,12 @@ export default function QuotesPage() {
       <div className="max-w-4xl mx-auto">
         {/* Header */}
         <div className="flex justify-between items-center mb-8">
-          <h1 className="text-3xl font-bold text-gray-800 dark:text-white">
+          <h1 className="text-2xl md:text-3xl font-bold text-gray-800 dark:text-white">
             Inspirational Quotes
           </h1>
-          <div className="flex gap-2">
+          
+          {/* Desktop Navigation */}
+          <div className="hidden md:flex gap-2">
             <Button
               variant="outline"
               size="sm"
@@ -395,7 +413,73 @@ export default function QuotesPage() {
               Sign Out
             </Button>
           </div>
+
+          {/* Mobile Navigation */}
+          <div className="md:hidden flex gap-2" data-mobile-menu>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setShowAddForm(!showAddForm)}
+            >
+              <Plus className="h-4 w-4" />
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setShowMobileMenu(!showMobileMenu)}
+              data-mobile-menu
+            >
+              {showMobileMenu ? (
+                <X className="h-4 w-4" />
+              ) : (
+                <Menu className="h-4 w-4" />
+              )}
+            </Button>
+          </div>
         </div>
+
+        {/* Mobile Menu Dropdown */}
+        <AnimatePresence>
+          {showMobileMenu && (
+            <motion.div
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: 'auto' }}
+              exit={{ opacity: 0, height: 0 }}
+              className="md:hidden mb-6"
+              data-mobile-menu
+            >
+              <Card className="p-4" data-mobile-menu>
+                <div className="space-y-2" data-mobile-menu>
+                  <Link href="/settings" className="block" data-mobile-menu>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="w-full justify-start"
+                      onClick={() => setShowMobileMenu(false)}
+                      data-mobile-menu
+                    >
+                      <Settings className="h-4 w-4 mr-2" />
+                      Settings
+                    </Button>
+                  </Link>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="w-full justify-start"
+                    onClick={() => {
+                      setShowMobileMenu(false)
+                      signOut()
+                    }}
+                    data-mobile-menu
+                  >
+                    <LogOut className="h-4 w-4 mr-2" />
+                    Sign Out
+                  </Button>
+                </div>
+              </Card>
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         {/* Add Quote Form */}
         <AnimatePresence>
