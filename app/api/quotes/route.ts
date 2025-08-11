@@ -20,7 +20,7 @@ export async function GET(request: NextRequest) {
     }
 
     const isRandom = request.nextUrl.searchParams.get('random') === 'true'
-    const count = parseInt(request.nextUrl.searchParams.get('count') || '1')
+    const count = parseInt(request.nextUrl.searchParams.get('count') || '10') // Default to 10 for prefetching
 
     // Get user preferences
     const preferences = await prisma.userPreferences.findUnique({
@@ -76,27 +76,36 @@ export async function GET(request: NextRequest) {
         return NextResponse.json({ quotes: [], total: 0 })
       }
 
-      // Use Prisma's findMany with orderBy random for simplicity
-      // Get a larger sample and then take random ones from it
-      const sampleSize = Math.min(totalCount, count * 10) // Get more than needed
-      const randomQuotes = await prisma.quote.findMany({
-        where: whereClause,
-        select: {
-          id: true,
-          text: true,
-          author: true,
-          category: true,
-          source: true,
-          isPreloaded: true,
-          createdAt: true,
-          updatedAt: true
-        },
-        take: sampleSize,
-      })
+      // Use proper randomization: get random offsets and fetch individual quotes
+      const randomOffsets = new Set<number>()
+      
+      // Generate unique random offsets
+      while (randomOffsets.size < Math.min(count, totalCount)) {
+        randomOffsets.add(Math.floor(Math.random() * totalCount))
+      }
 
-      // Shuffle and take the requested count
-      const shuffled = randomQuotes.sort(() => 0.5 - Math.random())
-      quotes = shuffled.slice(0, count)
+      // Fetch quotes at random positions using multiple queries
+      // This ensures true randomness across the entire dataset
+      const randomQuotePromises = Array.from(randomOffsets).map(offset => 
+        prisma.quote.findMany({
+          where: whereClause,
+          select: {
+            id: true,
+            text: true,
+            author: true,
+            category: true,
+            source: true,
+            isPreloaded: true,
+            createdAt: true,
+            updatedAt: true
+          },
+          skip: offset,
+          take: 1,
+        })
+      )
+
+      const randomQuoteArrays = await Promise.all(randomQuotePromises)
+      quotes = randomQuoteArrays.flat() // Flatten the arrays
     } else {
       // Regular fetch with pagination (fallback)
       const page = parseInt(request.nextUrl.searchParams.get('page') || '1')

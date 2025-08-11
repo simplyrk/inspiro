@@ -39,34 +39,52 @@ export default function QuotesPage() {
   const [isFullscreen, setIsFullscreen] = useState(false)
   const [wakeLock, setWakeLock] = useState<WakeLockSentinel | null>(null)
   const [newQuote, setNewQuote] = useState({ text: '', author: '', category: '', source: '' })
+  const [quotesQueue, setQuotesQueue] = useState<Quote[]>([])
+  const [currentIndex, setCurrentIndex] = useState(0)
 
-  // Fetch random quote
+  // Fetch batch of random quotes (prefetch 10 at a time)
   const { data: quotesData, isLoading, error, refetch } = useQuery<QuotesResponse>({
     queryKey: ['quotes', 'random'],
     queryFn: async () => {
-      const response = await fetch('/api/quotes?random=true&count=1')
+      const response = await fetch('/api/quotes?random=true&count=10')
       if (!response.ok) {
         throw new Error('Failed to fetch quotes')
       }
       return response.json()
     },
     enabled: !!session,
+    staleTime: 5 * 60 * 1000, // Consider data fresh for 5 minutes
   })
 
-  // Function to get a new random quote
-  const getNewQuote = useCallback(async () => {
-    const { data } = await refetch()
-    if (data?.quotes && data.quotes.length > 0) {
-      setCurrentQuote(data.quotes[0])
-    }
-  }, [refetch])
-
-  // Set current quote when data loads
+  // Initialize quotes queue when data loads
   useEffect(() => {
-    if (quotesData?.quotes && quotesData.quotes.length > 0 && !currentQuote) {
-      setCurrentQuote(quotesData.quotes[0])
+    if (quotesData?.quotes && quotesData.quotes.length > 0) {
+      setQuotesQueue(quotesData.quotes)
+      setCurrentIndex(0)
+      if (!currentQuote) {
+        setCurrentQuote(quotesData.quotes[0])
+      }
     }
   }, [quotesData?.quotes, currentQuote])
+
+  // Function to get next quote from queue or refetch new batch
+  const getNewQuote = useCallback(async () => {
+    const nextIndex = currentIndex + 1
+    
+    // If we have more quotes in the queue, use the next one
+    if (nextIndex < quotesQueue.length) {
+      setCurrentIndex(nextIndex)
+      setCurrentQuote(quotesQueue[nextIndex])
+    } else {
+      // Queue is exhausted, fetch new batch
+      const { data } = await refetch()
+      if (data?.quotes && data.quotes.length > 0) {
+        setQuotesQueue(data.quotes)
+        setCurrentIndex(0)
+        setCurrentQuote(data.quotes[0])
+      }
+    }
+  }, [currentIndex, quotesQueue, refetch])
 
   // Add quote mutation
   const addQuoteMutation = useMutation({
@@ -85,7 +103,10 @@ export default function QuotesPage() {
       queryClient.invalidateQueries({ queryKey: ['quotes'] })
       setShowAddForm(false)
       setNewQuote({ text: '', author: '', category: '', source: '' })
-      getNewQuote() // Get a new random quote
+      // Reset queue to fetch fresh batch that includes the new quote
+      setQuotesQueue([])
+      setCurrentIndex(0)
+      refetch()
       toast.success('Quote added successfully!')
     },
     onError: () => {
@@ -141,7 +162,13 @@ export default function QuotesPage() {
         isFavorited: currentQuote.isFavorited,
       })
       // Update current quote state immediately for UI feedback
-      setCurrentQuote(prev => prev ? { ...prev, isFavorited: !prev.isFavorited } : null)
+      const updatedQuote = { ...currentQuote, isFavorited: !currentQuote.isFavorited }
+      setCurrentQuote(updatedQuote)
+      
+      // Also update the quote in the queue
+      setQuotesQueue(prev => prev.map(quote => 
+        quote.id === currentQuote.id ? updatedQuote : quote
+      ))
     }
   }
 
@@ -528,6 +555,11 @@ export default function QuotesPage() {
             {quotesData?.total && (
               <p className="text-xs">
                 {quotesData.total} quotes available in your collection
+              </p>
+            )}
+            {quotesQueue.length > 0 && (
+              <p className="text-xs">
+                {quotesQueue.length - currentIndex - 1} more quotes queued • Quote {currentIndex + 1} of {quotesQueue.length} in current batch
               </p>
             )}
           </div>
