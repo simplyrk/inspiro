@@ -42,19 +42,23 @@ export default function QuotesPage() {
   const [quotesQueue, setQuotesQueue] = useState<Quote[]>([])
   const [currentIndex, setCurrentIndex] = useState(0)
   const [showMobileMenu, setShowMobileMenu] = useState(false)
+  const [fetchId, setFetchId] = useState(0) // Add unique fetch identifier
 
   // Fetch batch of random quotes (prefetch 10 at a time)
   const { data: quotesData, isLoading, error, refetch } = useQuery<QuotesResponse>({
-    queryKey: ['quotes', 'random'],
+    queryKey: ['quotes', 'random', fetchId],
     queryFn: async () => {
-      const response = await fetch('/api/quotes?random=true&count=10')
+      // Add timestamp to prevent caching issues
+      const timestamp = Date.now()
+      const response = await fetch(`/api/quotes?random=true&count=10&t=${timestamp}`)
       if (!response.ok) {
         throw new Error('Failed to fetch quotes')
       }
       return response.json()
     },
     enabled: !!session,
-    staleTime: 5 * 60 * 1000, // Consider data fresh for 5 minutes
+    staleTime: 0, // Always refetch to ensure fresh quotes
+    gcTime: 0, // Don't cache the results
   })
 
   // Initialize quotes queue when data loads
@@ -77,7 +81,8 @@ export default function QuotesPage() {
       setCurrentIndex(nextIndex)
       setCurrentQuote(quotesQueue[nextIndex])
     } else {
-      // Queue is exhausted, fetch new batch
+      // Queue is exhausted, fetch new batch with unique ID
+      setFetchId(prev => prev + 1)
       const { data } = await refetch()
       if (data?.quotes && data.quotes.length > 0) {
         setQuotesQueue(data.quotes)
@@ -107,6 +112,7 @@ export default function QuotesPage() {
       // Reset queue to fetch fresh batch that includes the new quote
       setQuotesQueue([])
       setCurrentIndex(0)
+      setFetchId(prev => prev + 1)
       refetch()
       toast.success('Quote added successfully!')
     },

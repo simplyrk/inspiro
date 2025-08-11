@@ -76,19 +76,25 @@ export async function GET(request: NextRequest) {
         return NextResponse.json({ quotes: [], total: 0 })
       }
 
-      // Use proper randomization: get random offsets and fetch individual quotes
-      const randomOffsets = new Set<number>()
-      
-      // Generate unique random offsets
-      while (randomOffsets.size < Math.min(count, totalCount)) {
-        randomOffsets.add(Math.floor(Math.random() * totalCount))
-      }
-
-      // Fetch quotes at random positions using multiple queries
-      // This ensures true randomness across the entire dataset
-      const randomQuotePromises = Array.from(randomOffsets).map(offset => 
-        prisma.quote.findMany({
-          where: whereClause,
+      // Use database-level randomization for true randomness
+      // This is much more efficient and ensures better distribution
+      if (source === 'FAVORITES') {
+        // For favorites, we already have the IDs, just shuffle them
+        const userFavorites = await prisma.favorite.findMany({
+          where: { userId: session.user.id },
+          select: { quoteId: true }
+        })
+        const favoriteIds = userFavorites.map(f => f.quoteId)
+        
+        // Shuffle the favorite IDs
+        for (let i = favoriteIds.length - 1; i > 0; i--) {
+          const j = Math.floor(Math.random() * (i + 1))
+          ;[favoriteIds[i], favoriteIds[j]] = [favoriteIds[j], favoriteIds[i]]
+        }
+        
+        const selectedIds = favoriteIds.slice(0, Math.min(count, favoriteIds.length))
+        quotes = await prisma.quote.findMany({
+          where: { id: { in: selectedIds } },
           select: {
             id: true,
             text: true,
@@ -98,14 +104,55 @@ export async function GET(request: NextRequest) {
             isPreloaded: true,
             createdAt: true,
             updatedAt: true
-          },
-          skip: offset,
-          take: 1,
+          }
         })
-      )
-
-      const randomQuoteArrays = await Promise.all(randomQuotePromises)
-      quotes = randomQuoteArrays.flat() // Flatten the arrays
+      } else {
+        // Use PostgreSQL's RANDOM() for true database-level randomization
+        const whereConditions = []
+        const params = []
+        let paramIndex = 1
+        
+        if (source === 'PRELOADED') {
+          whereConditions.push('"isPreloaded" = true')
+        } else if (source === 'CUSTOM') {
+          whereConditions.push('"userId" = $' + paramIndex + ' AND "isPreloaded" = false')
+          params.push(session.user.id)
+          paramIndex++
+        } else {
+          // BOTH
+          whereConditions.push('("isPreloaded" = true OR ("userId" = $' + paramIndex + ' AND "isPreloaded" = false))')
+          params.push(session.user.id)
+          paramIndex++
+        }
+        
+        if (category) {
+          whereConditions.push('"category" = $' + paramIndex)
+          params.push(category)
+          paramIndex++
+        }
+        
+        const whereClauseStr = whereConditions.length > 0 ? 'WHERE ' + whereConditions.join(' AND ') : ''
+        
+        // Use raw query for better randomization
+        const rawQuotes = await prisma.$queryRawUnsafe<Array<{
+          id: string
+          text: string
+          author: string
+          category: string | null
+          source: string | null
+          isPreloaded: boolean
+          createdAt: Date
+          updatedAt: Date
+        }>>(`
+          SELECT id, text, author, category, source, "isPreloaded", "createdAt", "updatedAt"
+          FROM "Quote" 
+          ${whereClauseStr}
+          ORDER BY RANDOM()
+          LIMIT $${paramIndex}
+        `, ...params, count)
+        
+        quotes = rawQuotes
+      }
     } else {
       // Regular fetch with pagination (fallback)
       const page = parseInt(request.nextUrl.searchParams.get('page') || '1')
@@ -134,7 +181,7 @@ export async function GET(request: NextRequest) {
     }
 
     // Get favorites for this user for the fetched quotes
-    const quoteIds = quotes.map((q: { id: string }) => q.id)
+    const quoteIds = (quotes as Array<{ id: string }>).map(q => q.id)
     const favorites = await prisma.favorite.findMany({
       where: {
         userId: session.user.id,
@@ -146,7 +193,12 @@ export async function GET(request: NextRequest) {
     const favoriteQuoteIds = new Set(favorites.map(f => f.quoteId))
 
     // Transform to include isFavorited flag
-    const quotesWithFavorites = quotes.map((quote: { id: string; createdAt: Date; updatedAt: Date; [key: string]: unknown }) => ({
+    const quotesWithFavorites = (quotes as Array<{ 
+      id: string; 
+      createdAt: Date; 
+      updatedAt: Date; 
+      [key: string]: unknown 
+    }>).map(quote => ({
       ...quote,
       createdAt: quote.createdAt.toISOString(),
       updatedAt: quote.updatedAt.toISOString(),
