@@ -1,0 +1,24 @@
+{
+  "enabled": true,
+  "name": "Documentation Sync",
+  "description": "Listens to TypeScript/JavaScript source files and configuration changes to automatically update project documentation",
+  "version": "1",
+  "when": {
+    "type": "fileEdited",
+    "patterns": [
+      "**/*.ts",
+      "**/*.tsx",
+      "**/*.js",
+      "**/*.jsx",
+      "package.json",
+      "tsconfig.json",
+      "next.config.js",
+      "tailwind.config.ts",
+      "prisma/schema.prisma"
+    ]
+  },
+  "then": {
+    "type": "askAgent",
+    "prompt": "Source code files have been modified in this Next.js TypeScript project. Please review the changes and update the README.md file to reflect any new features, API changes, component updates, or configuration modifications. Ensure the documentation accurately describes the current state of the project including setup instructions, usage examples, and any new functionality."
+  }
+}

@@ -1,0 +1,129 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id            String    @id @default(cuid())
+  email         String    @unique
+  password      String
+  name          String?
+  avatar        String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  
+  // Relations
+  accounts      Account[]
+  sessions      Session[]
+  customQuotes  Quote[]   @relation("UserQuotes")
+  favorites     Favorite[]
+  preferences   UserPreferences?
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Quote {
+  id            String    @id @default(cuid())
+  text          String    @db.Text
+  author        String
+  category      String?   // Placeholder for future categorization
+  source        String?   // Optional source reference
+  isPreloaded   Boolean   @default(false)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  
+  // Relations
+  userId        String?   // Null for preloaded quotes
+  user          User?     @relation("UserQuotes", fields: [userId], references: [id], onDelete: Cascade)
+  favorites     Favorite[]
+  
+  // Optimized Indexes for common query patterns
+  @@index([isPreloaded, createdAt(sort: Desc)]) // For fetching preloaded quotes ordered by creation
+  @@index([userId, createdAt(sort: Desc)]) // For fetching user's custom quotes
+  @@index([category, isPreloaded]) // For category-based filtering
+  @@index([createdAt(sort: Desc)]) // General ordering index
+}
+
+model Favorite {
+  id            String    @id @default(cuid())
+  createdAt     DateTime  @default(now())
+  
+  // Relations
+  userId        String
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  quoteId       String
+  quote         Quote     @relation(fields: [quoteId], references: [id], onDelete: Cascade)
+  
+  // Unique constraint to prevent duplicate favorites
+  @@unique([userId, quoteId])
+  @@index([userId, createdAt])
+}
+
+model UserPreferences {
+  id                String    @id @default(cuid())
+  rotationInterval  Int       @default(30) // in seconds
+  quoteSource       QuoteSource @default(BOTH)
+  theme             Theme     @default(SYSTEM)
+  showAuthor        Boolean   @default(true)
+  enableAnimations  Boolean   @default(true)
+  fontSize          FontSize  @default(MEDIUM)
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  
+  // Relations
+  userId            String    @unique
+  user              User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+enum QuoteSource {
+  PRELOADED     // Only preloaded quotes
+  CUSTOM        // Only user's custom quotes
+  FAVORITES     // Only user's favorite quotes
+  BOTH          // Mix of preloaded and custom
+}
+
+enum Theme {
+  LIGHT
+  DARK
+  SYSTEM
+}
+
+enum FontSize {
+  SMALL
+  MEDIUM
+  LARGE
+  EXTRA_LARGE
+}
